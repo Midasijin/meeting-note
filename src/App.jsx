@@ -1291,8 +1291,6 @@ function App() {
             },
           ],
         });
-        
-        alert('📢 카카오톡 공유 창을 호출했습니다.\n(메시지 포맷 텍스트도 클립보드에 복사되었습니다.)');
         return;
       } catch (err) {
         console.error('Kakao SDK 공유 에러:', err);
