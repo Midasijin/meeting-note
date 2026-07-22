@@ -790,18 +790,21 @@ function App() {
 
 
   const loadMeetingsList = async (client, deptId) => {
-    if (!client || !deptId) return;
+    if (!client) {
+      loadLocalHistoryFiltered(deptId);
+      return;
+    }
     try {
-      const { data, error } = await client
-        .from('meetings')
-        .select('*')
-        .eq('department_id', deptId)
-        .order('meeting_date', { ascending: false });
+      let query = client.from('meetings').select('*').order('created_at', { ascending: false });
+      if (deptId) {
+        query = query.eq('department_id', deptId);
+      }
+      const { data, error } = await query;
       if (error) throw error;
-      if (data) {
+      if (data && data.length > 0) {
         const formatted = data.map(m => ({
           id: m.id,
-          title: m.title,
+          title: m.title || '무제 회의',
           date: m.meeting_date,
           attendees: m.ai_attendees || '미정',
           content: m.refined_content,
@@ -811,6 +814,8 @@ function App() {
           url: '#'
         }));
         setArchiveList(formatted);
+      } else {
+        loadLocalHistoryFiltered(deptId);
       }
     } catch (e) {
       console.warn('Meetings load failed, fallback local:', e);
@@ -1050,16 +1055,19 @@ function App() {
       let insertedMeeting = null;
       let dbError = null;
 
+      const validDate = (meetingDate && meetingDate.trim()) ? meetingDate.trim() : new Date().toISOString().split('T')[0];
+      const validTitle = (meetingTitle && meetingTitle.trim()) ? meetingTitle.trim() : '무제 회의';
+
       if (supabase && user && user.id !== 'demo-user') {
         try {
           // meetings 테이블 컬럼에 맞춘 Payload (존재하지 않는 action_items 컬럼 제외)
           const insertPayload = {
-            title: meetingTitle,
-            meeting_date: meetingDate,
-            raw_text: rawText,
+            title: validTitle,
+            meeting_date: validDate,
+            raw_text: rawText || '',
             refined_content: refinedContent,
-            public_summary: publicSummary,
-            ai_attendees: extractedAttendees,
+            public_summary: publicSummary || '',
+            ai_attendees: extractedAttendees || '',
             author_id: user.id,
             department_id: userProfile ? userProfile.departmentId : null
           };
@@ -1077,12 +1085,12 @@ function App() {
 
       const newRecord = {
         id: insertedMeeting ? insertedMeeting.id : Date.now().toString(),
-        title: meetingTitle,
-        date: meetingDate,
+        title: validTitle,
+        date: validDate,
         attendees: extractedAttendees || attendees || '미정',
         content: refinedContent,
-        publicSummary: publicSummary,
-        actionItems: actionItems,
+        publicSummary: publicSummary || '',
+        actionItems: actionItems || [],
         synergyAnalysis: synergyAnalysis,
         departmentId: userProfile ? userProfile.departmentId : '1',
         departmentName: userProfile ? userProfile.departmentName : '개발부',
@@ -1092,20 +1100,16 @@ function App() {
       // 로컬 스토리지 보관 및 아카이브 갱신
       try {
         const localData = JSON.parse(localStorage.getItem('meeting_history') || '[]');
-        const updated = [newRecord, ...localData];
+        const updated = [newRecord, ...localData.filter(item => item.id !== newRecord.id)];
         localStorage.setItem('meeting_history', JSON.stringify(updated));
       } catch(e) {
         console.warn('LocalStorage save failed:', e);
       }
       
-      if (supabase && user && user.id !== 'demo-user') {
+      if (insertedMeeting && supabase && user && user.id !== 'demo-user') {
         await loadMeetingsList(supabase, userProfile ? userProfile.departmentId : null);
       } else {
-        const localData = JSON.parse(localStorage.getItem('meeting_history') || '[]');
-        const deptId = userProfile ? userProfile.departmentId : '1';
-        const deptName = userProfile ? userProfile.departmentName : '개발부';
-        const filtered = localData.filter(item => !item.departmentName || item.departmentName === deptName);
-        setArchiveList(filtered);
+        setArchiveList(prev => [newRecord, ...prev.filter(item => item.id !== newRecord.id)]);
       }
       
       if (dbError) {
