@@ -1024,22 +1024,40 @@ function App() {
       [오늘의 회의 녹취록]: ${rawText}
       `;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
-        })
-      });
+      // ponytail: try gemini-3.6-flash first, fallback to 3.5 and 2.5 flash
+      const modelsToTry = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+      let resJson = null;
+      let lastError = null;
 
-      const resJson = await response.json();
+      for (const model of modelsToTry) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                responseMimeType: "application/json"
+              }
+            })
+          });
+
+          const data = await response.json();
+          if (response.ok && !data.error) {
+            resJson = data;
+            break;
+          } else {
+            lastError = data.error?.message || `HTTP ${response.status}`;
+          }
+        } catch (err) {
+          lastError = err.message;
+        }
+      }
+
       clearInterval(interval);
 
-      if (resJson.error) {
-        throw new Error(resJson.error.message);
+      if (!resJson) {
+        throw new Error(lastError || 'Gemini API 호출에 실패했습니다.');
       }
 
       let aiRawOutput = resJson.candidates[0].content.parts[0].text;
